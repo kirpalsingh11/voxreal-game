@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>VoxReal — Endless Survival (Leaderboard)</title>
+<style>
+  :root{--bg:#071226;--card:#071726;--muted:#94a3b8;--accent:#06b6d4}
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial;background:var(--bg);color:#e6eef8}
+  .wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+  .panel{width:1000px;max-width:98%;background:linear-gradient(180deg,#071226,#05111a);padding:16px;border-radius:12px;box-shadow:0 12px 50px rgba(0,0,0,0.6)}
+  .top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  button{cursor:pointer;padding:8px 12px;border-radius:8px;border:0;background:var(--accent);color:#022}
+  canvas{border-radius:10px;background:linear-gradient(180deg,#0c1220,#071226);display:block}
+  .hud{display:flex;gap:12px;align-items:center}
+  .col{display:flex;flex-direction:column;gap:10px}
+  .sidebar{width:280px;padding-left:12px}
+  .card{background:var(--card);padding:12px;border-radius:8px;color:#cbd5e1}
+  .small{font-size:13px;color:var(--muted)}
+  .abilities{display:flex;flex-direction:column;gap:6px}
+  input[type=text]{width:100%;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.04);background:#05101a;color:#e6eef8}
+  .leaderboard li{margin-bottom:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel">
+    <div class="top">
+      <div>
+        <h2 style="margin:0">VoxReal — Endless Survival</h2>
+        <div class="small">Auto ability drops every 12s • Scales forever • Submit top scores</div>
+      </div>
+      <div class="hud">
+        <div class="small card" id="hud-stats">HP: 10 &nbsp; Score: 0</div>
+        <div class="small card" id="hud-buffs">Buffs: none</div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:12px">
+      <div>
+        <canvas id="game" width="640" height="400"></canvas>
+        <div style="margin-top:8px" class="small">Move: WASD / Arrows — Attack: Space</div>
+      </div>
+
+      <div class="sidebar">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <strong>Abilities (drops every 12s)</strong>
+            <div id="next-drop" class="small">next in 12s</div>
+          </div>
+          <div class="small" style="margin-top:8px">Available abilities: Health, Shield, Speed, Damage, Shockwave</div>
+          <div style="height:10px"></div>
+          <div class="small"><strong>Active</strong></div>
+          <div id="active-list" class="abilities small">None</div>
+        </div>
+
+        <div class="card" style="margin-top:10px">
+          <strong>Top 5 Global Scores</strong>
+          <ol id="leaderboard" class="leaderboard small" style="padding-left:16px;margin-top:8px">Loading...</ol>
+          <div style="margin-top:8px" class="small">Scores are public. Use a short display name when submitting.</div>
+        </div>
+
+        <div class="card" style="margin-top:10px">
+          <strong>Submit Score</strong>
+          <div class="small" style="margin-top:6px">After you die, enter a name and press Submit.</div>
+          <input id="player-name" type="text" placeholder="Your name (max 16 chars)" />
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button id="submit-score">Submit</button>
+            <button id="refresh-board">Refresh</button>
+          </div>
+        </div>
+
+        <div class="card small" style="margin-top:10px">
+          <strong>Notes</strong>
+          <div>- This build uses Firebase (Firestore). Paste your Firebase config into the HTML in the firebaseConfig object.</div>
+          <div>- For production, secure Firestore rules (example below) to validate score writes.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Firebase SDK (v9 modular) -->
+<script type="module">
+  // ---------- PASTE YOUR FIREBASE CONFIG ----------
+  // Get it from Firebase console -> Project settings -> Web app
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyDcRddILs6XUM9HEgtLWgnpp-CYDsgT9Dc",
+  authDomain: "voxreal-eb535.firebaseapp.com",
+  databaseURL: "https://voxreal-eb535-default-rtdb.firebaseio.com",
+  projectId: "voxreal-eb535",
+  storageBucket: "voxreal-eb535.firebasestorage.app",
+  messagingSenderId: "908265107377",
+  appId: "1:908265107377:web:89d0e3d0b9e826fd795790",
+  measurementId: "G-JGD735MMYG"
+};
+  // ------------------------------------------------
+
+  // If you don't want leaderboard, leave firebaseConfig empty or with fake values;
+  // leaderboard functions will gracefully fail but the game still works.
+
+  let firestore = null;
+  if(firebaseConfig.apiKey && !firebaseConfig.apiKey.includes("PASTE")){
+    import('https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js').then((modApp) => {
+      const app = modApp.initializeApp(firebaseConfig);
+      return import('https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js').then((modFs) => {
+        firestore = modFs.getFirestore(app);
+        // initial fetch
+        fetchTop5();
+      });
+    }).catch(err => {
+      console.warn("Firebase init failed:", err);
+    });
+  } else {
+    console.info("Firebase not configured — leaderboard disabled until you paste config.");
+    document.getElementById('leaderboard').innerHTML = '<li class="small">Leaderboard disabled (configure firebaseConfig)</li>';
+  }
+
+  // --------- Firestore helper functions ----------
+  async function submitScoreToFirestore(name, score){
+    if(!firestore) throw new Error("No Firestore");
+    // lightweight write: create a document with auto id and fields { name, score, ts }
+    const { getFirestore, collection, addDoc, serverTimestamp, query, orderBy, limit, getDocs } = await import('https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js');
+    const col = collection(firestore, 'leaderboard');
+    await addDoc(col, { name: String(name).slice(0,16), score: Number(score) || 0, ts: serverTimestamp() });
+    await fetchTop5();
+  }
+
+  async function fetchTop5(){
+    if(!firestore) return;
+    const { collection, query, orderBy, limit, getDocs } = await import('https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js');
+    try{
+      const q = query(collection(firestore,'leaderboard'), orderBy('score','desc'), limit(5));
+      const snap = await getDocs(q);
+      const list = document.getElementById('leaderboard');
+      list.innerHTML = '';
+      snap.forEach(doc => {
+        const d = doc.data();
+        const item = document.createElement('li');
+        item.textContent = `${d.name || 'anon'} — ${d.score || 0}`;
+        list.appendChild(item);
+      });
+      if(list.children.length === 0) list.innerHTML = '<li class="small">No scores yet</li>';
+    }catch(e){
+      console.warn("fetchTop5 error", e);
+    }
+  }
+
+  document.getElementById('submit-score').addEventListener('click', async ()=>{
+    const name = document.getElementById('player-name').value.trim().slice(0,16) || 'anon';
+    if(!lastScore) return alert('No score to submit (play first).');
+    try{
+      await submitScoreToFirestore(name, lastScore);
+      alert('Score submitted! Refreshing top 5...');
+      fetchTop5();
+    }catch(e){ alert('Failed to submit score. Check firebase config and rules.'); console.error(e); }
+  });
+
+  document.getElementById('refresh-board').addEventListener('click', ()=> fetchTop5());
+
+  // ---------- GAME CODE ----------
+  // Procedural sprite generator + game logic adapted for endless mode + ability drops.
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  let running = true;
+  let seed = Math.floor(Math.random()*999999);
+  let lastTime = performance.now();
+  let score = 0;
+  let lastScore = 0;
+  let spawnAccumulator = 0;
+  let dropAccumulator = 0;
+  const DROP_INTERVAL = 12.0; // seconds
+  const START_SPAWN_RATE = 1.2; // seconds per spawn
+  const MIN_SPAWN_RATE = 0.35; // seconds
+  const SCALE_SPEED = 0.0005; // difficulty per ms (tunable)
+
+  const player = { x:320, y:300, speed:90, baseSpeed:90, hp:12, maxHp:30, weapon:'fist', dmgMult:1, shield:0 };
+  const world = { enemies:[], pickups:[], boss:null, elapsed:0 };
+
+  // keyboard
+  const keys = {};
+  window.addEventListener('keydown', (e)=> keys[e.key.toLowerCase()] = true);
+  window.addEventListener('keyup', (e)=> keys[e.key.toLowerCase()] = false);
+
+  // procedural sprite (small, inlined for bundle)
+  function createRNG(s){ let t = s + 0x6D2B79F5; return ()=>{ t += 0x6D2B79F5; let r = Math.imul(t ^ (t>>>15), 1 | t); r ^= r + Math.imul(r ^ (r>>>7), 61 | r); return ((r ^ (r>>>14)) >>> 0) / 4294967296; } }
+  function isoPos(x,y,z,size){ const sx=(x-y)*size*0.5; const sy=(x+y)*size*0.25 - z*size*0.5; return [sx,sy]; }
+  function shadeColor(hex,amt){ let col=hex.replace('#',''); let num=parseInt(col,16); let r=(num>>16)+amt; r=Math.max(0,Math.min(255,r)); let g=((num>>8)&255)+amt; g=Math.max(0,Math.min(255,g)); let b=(num&255)+amt; b=Math.max(0,Math.min(255,b)); return '#'+(((r<<16)|(g<<8)|b)>>>0).toString(16).padStart(6,'0'); }
+  function drawCube(ctx,cx,cy,x,y,z,size,color){ const [sx,sy]=isoPos(x,y,z,size); const px=cx+sx, py=cy+sy, s=size; const top=[[px,py-s*0.5],[px+s*0.5,py-s*0.25],[px,py],[px-s*0.5,py-s*0.25]]; const left=[[px-s*0.5,py-s*0.25],[px,py],[px,py+s*0.5],[px-s*0.5,py+s*0.25]]; const right=[[px+s*0.5,py-s*0.25],[px,py],[px,py+s*0.5],[px+s*0.5,py+s*0.25]]; ctx.beginPath(); ctx.moveTo(...left[0]); for(let i=1;i<left.length;i++) ctx.lineTo(...left[i]); ctx.closePath(); ctx.fillStyle=shadeColor(color,-28); ctx.fill(); ctx.strokeStyle='rgba(0,0,0,0.18)'; ctx.stroke(); ctx.beginPath(); ctx.moveTo(...right[0]); for(let i=1;i<right.length;i++) ctx.lineTo(...right[i]); ctx.closePath(); ctx.fillStyle=shadeColor(color,-8); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.moveTo(...top[0]); for(let i=1;i<top.length;i++) ctx.lineTo(...top[i]); ctx.closePath(); ctx.fillStyle=shadeColor(color,18); ctx.fill(); ctx.stroke(); }
+
+  function generateSprite(style, size, seed){
+    const rng = createRNG(seed);
+    const pal = {};
+    if(style==='mech'){ pal.body='#6b7280'; pal.acc='#00ffd6'; }
+    if(style==='knight'){ pal.body='#8b5cf6'; pal.acc='#ef4444'; }
+    if(style==='mage'){ pal.body='#1e40af'; pal.acc='#a16207'; }
+    if(style==='punk'){ pal.body='#ec4899'; pal.acc='#06b6d4'; }
+    pal.default = '#9ca3af';
+    const vox = [];
+    for(let x=3;x<=4;x++) for(let y=3;y<=4;y++) for(let z=1;z<=3;z++) vox.push([x,y,z,'body']);
+    for(let x=3;x<=4;x++) for(let y=2;y<=3;y++) for(let z=4;z<=5;z++) vox.push([x,y,z,'head']);
+    for(let z=1;z<=3;z++){ vox.push([2,3,z,'arm']); vox.push([5,3,z,'arm']); }
+    vox.push([3,5,0,'leg']); vox.push([4,5,0,'leg']);
+    if(style==='mech'){ vox.push([3,2,6,'acc']); vox.push([4,2,6,'acc']); }
+    const canvas = document.createElement('canvas'); const cw=Math.max(64,size*8); canvas.width=cw; canvas.height=cw; const cctx=canvas.getContext('2d'); const cx=cw/2, cy=cw/2+6;
+    vox.sort((a,b)=> (a[0]+a[1]) - (b[0]+b[1]) || a[2]-b[2]);
+    for(const v of vox){ const [x,y,z,k]=v; const color = pal[k] || pal.default; drawCube(cctx,cx,cy,x-3.5,y-3.5,z,size/2,color); }
+    return canvas;
+  }
+
+  const assets = { sprites:{} };
+  ['knight','mech','mage','punk'].forEach((s,i)=> assets.sprites[s] = generateSprite(s,16, seed + i*13));
+
+  // enemy template generator
+  function spawnEnemy(tier=0){
+    // tier affects hp/speed/score
+    const baseX = Math.random()*560 + 40;
+    const baseY = Math.random()*280 + 40;
+    const typeSet = ['mech','punk','mage'];
+    const style = typeSet[Math.floor(Math.random()*typeSet.length)];
+    const baseHP = 1 + Math.floor(1.5 * (1 + tier*0.4));
+    const spd = 30 + Math.random()*40 + tier*4;
+    const e = { x: baseX, y: baseY, hp: baseHP, maxHp: baseHP, speed: spd, style, w:16, h:16, score: 5 + Math.floor(tier*2) };
+    world.enemies.push(e);
+  }
+
+  // Ability drop system
+  function pickRandomAbility(){
+    const arr = ['health','shield','speed','damage','shockwave'];
+    return arr[Math.floor(Math.random()*arr.length)];
+  }
+  function spawnAbility(){
+    const x = 60 + Math.random()*520;
+    const y = 40 + Math.random()*320;
+    const type = pickRandomAbility();
+    world.pickups.push({ id: Math.random().toString(36).slice(2,8), x, y, type });
+  }
+
+  // ability apply
+  const activeBuffs = [];
+  function applyPickup(pk){
+    const p = player;
+    if(pk.type === 'health'){ p.hp = Math.min(p.maxHp, p.hp + 6); }
+    else if(pk.type === 'shield'){ p.shield = (p.shield || 0) + 3; activeBuffs.push({ name:'Shield (3)', expires: null }); }
+    else if(pk.type === 'speed'){ p.speed = p.baseSpeed * 1.6; activeBuffs.push({ name:'Speed', expires: performance.now() + 8000 }); }
+    else if(pk.type === 'damage'){ p.dmgMult = 2; activeBuffs.push({ name:'Damage x2', expires: performance.now() + 10000 }); }
+    else if(pk.type === 'shockwave'){ // instant AOE
+      world.enemies.forEach(e=>{ const d = Math.hypot(e.x - p.x, e.y - p.y); if(d < 120){ e.hp -= 4; e.x += (e.x - p.x) / (d || 1) * 30; e.y += (e.y - p.y) / (d || 1) * 30; } });
+      activeBuffs.push({ name:'Shockwave', expires: performance.now() + 1200 });
+    }
+  }
+
+  // visual helpers
+  function drawHUD(){
+    document.getElementById('hud-stats').textContent = `HP: ${player.hp}  Score: ${score}`;
+    const list = document.getElementById('active-list');
+    const now = performance.now();
+    // remove expired
+    for(let i=activeBuffs.length-1;i>=0;i--){
+      if(activeBuffs[i].expires && activeBuffs[i].expires < now) activeBuffs.splice(i,1);
+    }
+    list.innerHTML = activeBuffs.length ? '' : 'None';
+    activeBuffs.forEach(b => {
+      const el = document.createElement('div');
+      if(b.expires){ const remaining = Math.max(0, Math.round((b.expires - now)/1000)); el.textContent = `${b.name} (${remaining}s)`; }
+      else el.textContent = b.name;
+      list.appendChild(el);
+    });
+    document.getElementById('next-drop').textContent = `next in ${Math.max(0, Math.round(DROP_INTERVAL - dropAccumulator))}s`;
+  }
+
+  // player attack logic
+  function playerAttack(){
+    // melee pulse radius 40
+    const dmg = 2 * (player.dmgMult || 1);
+    world.enemies.forEach(e => {
+      const d = Math.hypot(e.x - player.x, e.y - player.y);
+      if(d < 40){ e.hp -= dmg; if(e.hp <= 0) score += e.score; }
+    });
+  }
+
+  // main loop
+  let lastAttackTime = 0;
+  function gameLoop(now){
+    const dt = (now - lastTime) / 1000;
+    lastTime = now;
+    if(!running){
+      render();
+      requestAnimationFrame(gameLoop);
+      return;
+    }
+    world.elapsed += (now - lastTime);
+    // scale difficulty by total time played (ms)
+    const difficultyScale = 1 + (now * SCALE_SPEED); // grows slowly
+    // spawn logic (accumulators)
+    spawnAccumulator += dt;
+    const spawnRate = Math.max(MIN_SPAWN_RATE, START_SPAWN_RATE * (1 / (1 + (now*0.00002)))); // decreases as time goes
+    if(spawnAccumulator > spawnRate){
+      spawnAccumulator = 0;
+      const tier = Math.floor(now * SCALE_SPEED * 10);
+      spawnEnemy(tier);
+    }
+
+    // ability drops
+    dropAccumulator += dt;
+    if(dropAccumulator >= DROP_INTERVAL){
+      dropAccumulator = 0;
+      spawnAbility();
+    }
+
+    // player movement
+    let vx=0, vy=0;
+    if(keys['w']||keys['arrowup']) vy -= 1;
+    if(keys['s']||keys['arrowdown']) vy += 1;
+    if(keys['a']||keys['arrowleft']) vx -= 1;
+    if(keys['d']||keys['arrowright']) vx += 1;
+    const norm = Math.hypot(vx,vy) || 1;
+    player.x += (vx/norm) * player.speed * dt;
+    player.y += (vy/norm) * player.speed * dt;
+    player.x = Math.max(16, Math.min(624, player.x));
+    player.y = Math.max(16, Math.min(384, player.y));
+
+    // attack with space (simple cooldown)
+    if(keys[' ']){
+      if(now - lastAttackTime > 260){
+        playerAttack();
+        lastAttackTime = now;
+      }
+    }
+
+    // update enemies
+    for(let i = world.enemies.length - 1; i >= 0; i--){
+      const e = world.enemies[i];
+      const dx = player.x - e.x, dy = player.y - e.y;
+      const dist = Math.hypot(dx,dy) || 1;
+      e.x += (dx/dist) * e.speed * dt;
+      e.y += (dy/dist) * e.speed * dt;
+      // collision damage
+      if(Math.hypot(e.x - player.x, e.y - player.y) < 18){
+        // enemy hits player
+        if(!e._lastHit || now - e._lastHit > 700){
+          e._lastHit = now;
+          if(player.shield && player.shield > 0){
+            player.shield = Math.max(0, player.shield - 1);
+          } else {
+            player.hp -= 1;
+          }
+        }
+      }
+      if(e.hp <= 0){ world.enemies.splice(i,1); }
+    }
+
+    // pickups collision
+    for(let i=world.pickups.length-1;i>=0;i--){
+      const pk = world.pickups[i];
+      if(Math.hypot(pk.x - player.x, pk.y - player.y) < 18){
+        applyPickup(pk);
+        world.pickups.splice(i,1);
+      }
+    }
+
+    // expire buffs timed effects
+    const nowTime = performance.now();
+    for(let i=activeBuffs.length-1;i>=0;i--){
+      const b = activeBuffs[i];
+      if(b.expires && b.expires < nowTime){
+        // revert effect
+        if(b.name.startsWith('Speed')) player.speed = player.baseSpeed;
+        if(b.name.startsWith('Damage')) player.dmgMult = 1;
+        activeBuffs.splice(i,1);
+      }
+    }
+
+    // gradually increase player score by surviving + kills
+    score += dt * 1.5; // survive score per second
+    drawHUD();
+    render();
+    if(player.hp <= 0) {
+      running = false;
+      lastScore = Math.floor(score);
+      // show death message overlay by drawing once more
+      render();
+    }
+    requestAnimationFrame(gameLoop);
+  }
+
+  function render(){
+    ctx.clearRect(0,0,640,400);
+    // ground background
+    const g = ctx.createLinearGradient(0,0,0,400);
+    g.addColorStop(0,'#0b1220'); g.addColorStop(1,'#06101a');
+    ctx.fillStyle = g; ctx.fillRect(0,0,640,400);
+
+    // subtle grid
+    ctx.globalAlpha = 0.04;
+    for(let x=0;x<640;x+=32){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,400); ctx.strokeStyle='white'; ctx.stroke(); }
+    for(let y=0;y<400;y+=32){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(640,y); ctx.strokeStyle='white'; ctx.stroke(); }
+    ctx.globalAlpha = 1;
+
+    // draw pickups
+    for(const pk of world.pickups){
+      if(pk.type === 'health'){ ctx.fillStyle = '#ef4444'; } 
+      else if(pk.type === 'shield'){ ctx.fillStyle = '#10b981' }
+      else if(pk.type === 'speed'){ ctx.fillStyle = '#06b6d4' }
+      else if(pk.type === 'damage'){ ctx.fillStyle = '#f97316' }
+      else if(pk.type === 'shockwave'){ ctx.fillStyle = '#facc15' }
+      ctx.beginPath(); ctx.arc(pk.x, pk.y, 8, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle='white'; ctx.font='10px sans-serif'; ctx.fillText(pk.type, pk.x-16, pk.y+20);
+    }
+
+    // draw enemies
+    for(const e of world.enemies){
+      const spr = assets.sprites[e.style];
+      if(spr) ctx.drawImage(spr, e.x - spr.width/2, e.y - spr.height/2 - 6);
+      // hp bar
+      ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(e.x-12, e.y+18, 24, 4);
+      ctx.fillStyle = '#ef4444'; ctx.fillRect(e.x-12, e.y+18, 24 * Math.max(0, e.hp) / Math.max(1,e.maxHp), 4);
+    }
+
+    // draw player (knight sprite)
+    const pa = assets.sprites['knight'];
+    if(pa) ctx.drawImage(pa, player.x - pa.width/2, player.y - pa.height/2 - 6);
+
+    // if dead overlay
+    if(!running){
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0,0,640,400);
+      ctx.fillStyle = 'white'; ctx.font = '28px sans-serif'; ctx.fillText('YOU DIED', 260, 180);
+      ctx.font = '16px sans-serif'; ctx.fillText(`Score: ${Math.floor(score)}`, 280, 210);
+      ctx.fillText('Press any key to restart', 240, 250);
+      ctx.restore();
+    }
+  }
+
+  // restart logic (press any key)
+  window.addEventListener('keydown', (e) => {
+    if(!running){
+      // reset state
+      running = true;
+      player.hp = 12; player.shield = 0; player.speed = player.baseSpeed; player.dmgMult = 1;
+      world.enemies = []; world.pickups = []; score = 0; lastScore = 0; seed = Math.floor(Math.random()*999999);
+      assets.sprites['knight'] = generateSprite('knight', 16, seed + 13);
+      world._customApplied = false;
+    }
+  });
+
+  // start loop
+  lastTime = performance.now();
+  requestAnimationFrame(gameLoop);
+
+  // scoreboard periodic refresh
+  setInterval(()=>{ if(firestore) fetchTop5(); }, 10000);
+
+</script>
+</body>
+</html>
