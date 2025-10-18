@@ -1,89 +1,63 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>VoxReal — Endless Survival (Leaderboard)</title>
-<style>
-  :root{--bg:#071226;--card:#071726;--muted:#94a3b8;--accent:#06b6d4}
-  html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial;background:var(--bg);color:#e6eef8}
-  .wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
-  .panel{width:1000px;max-width:98%;background:linear-gradient(180deg,#071226,#05111a);padding:16px;border-radius:12px;box-shadow:0 12px 50px rgba(0,0,0,0.6)}
-  .top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
-  button{cursor:pointer;padding:8px 12px;border-radius:8px;border:0;background:var(--accent);color:#022}
-  canvas{border-radius:10px;background:linear-gradient(180deg,#0c1220,#071226);display:block}
-  .hud{display:flex;gap:12px;align-items:center}
-  .col{display:flex;flex-direction:column;gap:10px}
-  .sidebar{width:280px;padding-left:12px}
-  .card{background:var(--card);padding:12px;border-radius:8px;color:#cbd5e1}
-  .small{font-size:13px;color:var(--muted)}
-  .abilities{display:flex;flex-direction:column;gap:6px}
-  input[type=text]{width:100%;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.04);background:#05101a;color:#e6eef8}
-  .leaderboard li{margin-bottom:6px}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VoxReal: Endless Survival</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #112;
+      color: white;
+      font-family: monospace;
+    }
+    canvas {
+      display: block;
+      background: radial-gradient(circle at center, #123 0%, #001 100%);
+    }
+    #leaderboard {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 12px 20px;
+      border-radius: 10px;
+      font-size: 14px;
+      backdrop-filter: blur(4px);
+    }
+    #leaderboard h3 {
+      margin: 0 0 8px 0;
+      font-size: 16px;
+      text-align: center;
+      color: #0ff;
+    }
+    #leaderboard ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    #leaderboard li {
+      margin: 4px 0;
+    }
+  </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="panel">
-    <div class="top">
-      <div>
-        <h2 style="margin:0">VoxReal — Endless Survival</h2>
-        <div class="small">Auto ability drops every 12s • Scales forever • Submit top scores</div>
-      </div>
-      <div class="hud">
-        <div class="small card" id="hud-stats">HP: 10 &nbsp; Score: 0</div>
-        <div class="small card" id="hud-buffs">Buffs: none</div>
-      </div>
-    </div>
-
-    <div style="display:flex;gap:12px">
-      <div>
-        <canvas id="game" width="640" height="400"></canvas>
-        <div style="margin-top:8px" class="small">Move: WASD / Arrows — Attack: Space</div>
-      </div>
-
-      <div class="sidebar">
-        <div class="card">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <strong>Abilities (drops every 12s)</strong>
-            <div id="next-drop" class="small">next in 12s</div>
-          </div>
-          <div class="small" style="margin-top:8px">Available abilities: Health, Shield, Speed, Damage, Shockwave</div>
-          <div style="height:10px"></div>
-          <div class="small"><strong>Active</strong></div>
-          <div id="active-list" class="abilities small">None</div>
-        </div>
-
-        <div class="card" style="margin-top:10px">
-          <strong>Top 5 Global Scores</strong>
-          <ol id="leaderboard" class="leaderboard small" style="padding-left:16px;margin-top:8px">Loading...</ol>
-          <div style="margin-top:8px" class="small">Scores are public. Use a short display name when submitting.</div>
-        </div>
-
-        <div class="card" style="margin-top:10px">
-          <strong>Submit Score</strong>
-          <div class="small" style="margin-top:6px">After you die, enter a name and press Submit.</div>
-          <input id="player-name" type="text" placeholder="Your name (max 16 chars)" />
-          <div style="display:flex;gap:8px;margin-top:8px">
-            <button id="submit-score">Submit</button>
-            <button id="refresh-board">Refresh</button>
-          </div>
-        </div>
-
-        <div class="card small" style="margin-top:10px">
-          <strong>Notes</strong>
-          <div>- This build uses Firebase (Firestore). Paste your Firebase config into the HTML in the firebaseConfig object.</div>
-          <div>- For production, secure Firestore rules (example below) to validate score writes.</div>
-        </div>
-      </div>
-    </div>
+  <canvas id="gameCanvas"></canvas>
+  <div id="leaderboard">
+    <h3>🌍 Top 5 Scores</h3>
+    <ul id="scores"></ul>
   </div>
-</div>
 
-<!-- Firebase SDK (v9 modular) -->
-<script type="module">
-  // ---------- PASTE YOUR FIREBASE CONFIG ----------
-  // Get it from Firebase console -> Project settings -> Web app
+  <!-- Game + Firebase -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
+    import {
+      getFirestore, collection, addDoc,
+      getDocs, query, orderBy, limit
+    } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore.js";
+
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
   apiKey: "AIzaSyDcRddILs6XUM9HEgtLWgnpp-CYDsgT9Dc",
@@ -95,368 +69,215 @@ const firebaseConfig = {
   appId: "1:908265107377:web:89d0e3d0b9e826fd795790",
   measurementId: "G-JGD735MMYG"
 };
-  // ------------------------------------------------
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
 
-  // If you don't want leaderboard, leave firebaseConfig empty or with fake values;
-  // leaderboard functions will gracefully fail but the game still works.
+    // ======== GAME CODE ========
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
 
-  let firestore = null;
-  if(firebaseConfig.apiKey && !firebaseConfig.apiKey.includes("PASTE")){
-    import('https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js').then((modApp) => {
-      const app = modApp.initializeApp(firebaseConfig);
-      return import('https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js').then((modFs) => {
-        firestore = modFs.getFirestore(app);
-        // initial fetch
-        fetchTop5();
-      });
-    }).catch(err => {
-      console.warn("Firebase init failed:", err);
-    });
-  } else {
-    console.info("Firebase not configured — leaderboard disabled until you paste config.");
-    document.getElementById('leaderboard').innerHTML = '<li class="small">Leaderboard disabled (configure firebaseConfig)</li>';
-  }
+    let player, enemies = [], pickups = [];
+    let keys = {};
+    let timeSurvived = 0, lastDrop = 0, score = 0, gameOver = false;
 
-  // --------- Firestore helper functions ----------
-  async function submitScoreToFirestore(name, score){
-    if(!firestore) throw new Error("No Firestore");
-    // lightweight write: create a document with auto id and fields { name, score, ts }
-    const { getFirestore, collection, addDoc, serverTimestamp, query, orderBy, limit, getDocs } = await import('https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js');
-    const col = collection(firestore, 'leaderboard');
-    await addDoc(col, { name: String(name).slice(0,16), score: Number(score) || 0, ts: serverTimestamp() });
-    await fetchTop5();
-  }
-
-  async function fetchTop5(){
-    if(!firestore) return;
-    const { collection, query, orderBy, limit, getDocs } = await import('https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js');
-    try{
-      const q = query(collection(firestore,'leaderboard'), orderBy('score','desc'), limit(5));
-      const snap = await getDocs(q);
-      const list = document.getElementById('leaderboard');
-      list.innerHTML = '';
-      snap.forEach(doc => {
-        const d = doc.data();
-        const item = document.createElement('li');
-        item.textContent = `${d.name || 'anon'} — ${d.score || 0}`;
-        list.appendChild(item);
-      });
-      if(list.children.length === 0) list.innerHTML = '<li class="small">No scores yet</li>';
-    }catch(e){
-      console.warn("fetchTop5 error", e);
+    class Player {
+      constructor() {
+        this.x = canvas.width / 2;
+        this.y = canvas.height / 2;
+        this.size = 24;
+        this.color = "#4af";
+        this.hp = 100;
+        this.speed = 3;
+        this.damage = 10;
+        this.cooldown = 0;
+        this.shield = 0;
+      }
+      update() {
+        if (keys["w"] || keys["ArrowUp"]) this.y -= this.speed;
+        if (keys["s"] || keys["ArrowDown"]) this.y += this.speed;
+        if (keys["a"] || keys["ArrowLeft"]) this.x -= this.speed;
+        if (keys["d"] || keys["ArrowRight"]) this.x += this.speed;
+        this.x = Math.max(this.size, Math.min(canvas.width - this.size, this.x));
+        this.y = Math.max(this.size, Math.min(canvas.height - this.size, this.y));
+        if (this.cooldown > 0) this.cooldown--;
+      }
+      attack() {
+        if (this.cooldown > 0) return;
+        this.cooldown = 30;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size * 1.5, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,255,0,0.3)";
+        ctx.fill();
+        enemies.forEach((e, i) => {
+          const dist = Math.hypot(e.x - this.x, e.y - this.y);
+          if (dist < this.size * 2) {
+            e.hp -= this.damage;
+            if (e.hp <= 0) {
+              enemies.splice(i, 1);
+              score += 10;
+            }
+          }
+        });
+      }
+      takeDamage(amount) {
+        if (this.shield > 0) { this.shield--; return; }
+        this.hp -= amount;
+        if (this.hp <= 0) gameOver = true;
+      }
+      draw() {
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
-  }
 
-  document.getElementById('submit-score').addEventListener('click', async ()=>{
-    const name = document.getElementById('player-name').value.trim().slice(0,16) || 'anon';
-    if(!lastScore) return alert('No score to submit (play first).');
-    try{
-      await submitScoreToFirestore(name, lastScore);
-      alert('Score submitted! Refreshing top 5...');
-      fetchTop5();
-    }catch(e){ alert('Failed to submit score. Check firebase config and rules.'); console.error(e); }
-  });
-
-  document.getElementById('refresh-board').addEventListener('click', ()=> fetchTop5());
-// =============================
-// VoxReal Endless Survival
-// =============================
-
-// Canvas setup
-const canvas = document.getElementById("gameCanvas");
-const ctx = canvas.getContext("2d");
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
-
-// Game state
-let player, enemies = [], pickups = [];
-let keys = {};
-let timeSurvived = 0;
-let lastDrop = 0;
-let score = 0;
-let gameOver = false;
-
-// =============================
-// Player
-// =============================
-class Player {
-  constructor() {
-    this.x = canvas.width / 2;
-    this.y = canvas.height / 2;
-    this.size = 24;
-    this.color = "#4af";
-    this.hp = 100;
-    this.speed = 3;
-    this.damage = 10;
-    this.cooldown = 0;
-    this.shield = 0;
-  }
-
-  update() {
-    if (keys["w"] || keys["ArrowUp"]) this.y -= this.speed;
-    if (keys["s"] || keys["ArrowDown"]) this.y += this.speed;
-    if (keys["a"] || keys["ArrowLeft"]) this.x -= this.speed;
-    if (keys["d"] || keys["ArrowRight"]) this.x += this.speed;
-
-    this.x = Math.max(this.size, Math.min(canvas.width - this.size, this.x));
-    this.y = Math.max(this.size, Math.min(canvas.height - this.size, this.y));
-
-    if (this.cooldown > 0) this.cooldown--;
-  }
-
-  attack() {
-    if (this.cooldown > 0) return;
-    this.cooldown = 30; // ~0.5 sec
-    // Attack flash
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.size * 1.5, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255,255,0,0.2)";
-    ctx.fill();
-    enemies.forEach((e, i) => {
-      const dist = Math.hypot(e.x - this.x, e.y - this.y);
-      if (dist < this.size * 2) {
-        e.hp -= this.damage;
-        if (e.hp <= 0) {
-          enemies.splice(i, 1);
-          score += 10;
+    class Enemy {
+      constructor() {
+        const edge = Math.floor(Math.random() * 4);
+        if (edge === 0) { this.x = 0; this.y = Math.random() * canvas.height; }
+        if (edge === 1) { this.x = canvas.width; this.y = Math.random() * canvas.height; }
+        if (edge === 2) { this.x = Math.random() * canvas.width; this.y = 0; }
+        if (edge === 3) { this.x = Math.random() * canvas.width; this.y = canvas.height; }
+        this.size = 20;
+        this.color = "#f44";
+        this.baseSpeed = 0.6 + Math.random() * 0.4;
+        this.hp = 20;
+        this.damage = 10;
+      }
+      update() {
+        const dx = player.x - this.x;
+        const dy = player.y - this.y;
+        const angle = Math.atan2(dy, dx);
+        const minutes = timeSurvived / 60;
+        const scale = 1 + Math.log(minutes + 1) * 0.4;
+        this.speed = Math.min(this.baseSpeed * scale, this.baseSpeed * 3);
+        this.x += Math.cos(angle) * this.speed;
+        this.y += Math.sin(angle) * this.speed;
+        if (Math.hypot(dx, dy) < player.size + this.size) {
+          player.takeDamage(this.damage);
+          this.hp = 0;
         }
       }
-    });
-  }
-
-  takeDamage(amount) {
-    if (this.shield > 0) {
-      this.shield--;
-      return;
+      draw() {
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
-    this.hp -= amount;
-    if (this.hp <= 0) {
-      gameOver = true;
-    }
-  }
 
-  draw() {
-    ctx.fillStyle = this.color;
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-
-// =============================
-// Enemy
-// =============================
-class Enemy {
-  constructor() {
-    this.x = Math.random() < 0.5 ? 0 : canvas.width;
-    this.y = Math.random() * canvas.height;
-    this.size = 20;
-    this.color = "#f44";
-    this.baseSpeed = 0.5 + Math.random() * 0.5;
-    this.hp = 20;
-    this.damage = 10;
-  }
-
-  update() {
-    const dx = player.x - this.x;
-    const dy = player.y - this.y;
-    const angle = Math.atan2(dy, dx);
-
-    // Smooth scaling curve
-    const minutesSurvived = timeSurvived / 60;
-    const smoothScale = 1 + Math.log(minutesSurvived + 1) * 0.4;
-    this.speed = this.baseSpeed * smoothScale;
-    if (this.speed > this.baseSpeed * 3) this.speed = this.baseSpeed * 3;
-
-    this.x += Math.cos(angle) * this.speed;
-    this.y += Math.sin(angle) * this.speed;
-
-    const distance = Math.hypot(dx, dy);
-    if (distance < player.size + this.size) {
-      player.takeDamage(this.damage);
-      this.hp = 0; // die on impact
-    }
-  }
-
-  draw() {
-    ctx.fillStyle = this.color;
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-
-// =============================
-// Pickups
-// =============================
-class Pickup {
-  constructor(type) {
-    this.x = Math.random() * canvas.width;
-    this.y = Math.random() * canvas.height;
-    this.size = 14;
-    this.type = type;
-    this.color = {
-      health: "#0f0",
-      shield: "#0ff",
-      speed: "#ff0",
-      damage: "#f0f",
-      shockwave: "#fff"
-    }[type];
-  }
-
-  draw() {
-    ctx.fillStyle = this.color;
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  apply() {
-    if (this.type === "health") player.hp = Math.min(100, player.hp + 20);
-    if (this.type === "shield") player.shield = 3;
-    if (this.type === "speed") {
-      player.speed *= 1.6;
-      setTimeout(() => (player.speed /= 1.6), 8000);
-    }
-    if (this.type === "damage") {
-      player.damage *= 2;
-      setTimeout(() => (player.damage /= 2), 10000);
-    }
-    if (this.type === "shockwave") {
-      enemies.forEach(e => {
-        const dist = Math.hypot(e.x - player.x, e.y - player.y);
-        if (dist < 200) {
-          e.hp -= 20;
-          const ang = Math.atan2(e.y - player.y, e.x - player.x);
-          e.x += Math.cos(ang) * 100;
-          e.y += Math.sin(ang) * 100;
+    class Pickup {
+      constructor(type) {
+        this.x = Math.random() * canvas.width;
+        this.y = Math.random() * canvas.height;
+        this.size = 14;
+        this.type = type;
+        this.color = { health:"#0f0", shield:"#0ff", speed:"#ff0", damage:"#f0f", shockwave:"#fff" }[type];
+      }
+      draw() {
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      apply() {
+        if (this.type === "health") player.hp = Math.min(100, player.hp + 20);
+        if (this.type === "shield") player.shield = 3;
+        if (this.type === "speed") { player.speed *= 1.6; setTimeout(()=>player.speed/=1.6,8000);}
+        if (this.type === "damage") { player.damage *= 2; setTimeout(()=>player.damage/=2,10000);}
+        if (this.type === "shockwave") {
+          enemies.forEach(e => {
+            const dist = Math.hypot(e.x - player.x, e.y - player.y);
+            if (dist < 200) {
+              e.hp -= 20;
+              const ang = Math.atan2(e.y - player.y, e.x - player.x);
+              e.x += Math.cos(ang)*100;
+              e.y += Math.sin(ang)*100;
+            }
+          });
         }
+      }
+    }
+
+    function spawnEnemy() { enemies.push(new Enemy()); }
+    function spawnPickup() {
+      const types = ["health","shield","speed","damage","shockwave"];
+      pickups.push(new Pickup(types[Math.floor(Math.random()*types.length)]));
+    }
+
+    function drawHUD() {
+      ctx.fillStyle = "#fff";
+      ctx.font = "18px monospace";
+      ctx.fillText(`HP: ${player.hp}`, 20, 30);
+      ctx.fillText(`Shield: ${player.shield}`, 20, 55);
+      ctx.fillText(`Score: ${score}`, 20, 80);
+    }
+
+    function drawGameOver() {
+      ctx.fillStyle = "rgba(0,0,0,0.7)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#fff";
+      ctx.font = "36px monospace";
+      ctx.fillText("GAME OVER", canvas.width / 2 - 120, canvas.height / 2);
+      ctx.font = "20px monospace";
+      ctx.fillText("Press any key to restart", canvas.width / 2 - 140, canvas.height / 2 + 40);
+    }
+
+    async function submitScore() {
+      const name = prompt("Enter your name for the leaderboard:") || "Unknown";
+      await addDoc(collection(db, "leaderboard"), { name, score, time: new Date().toISOString() });
+      loadLeaderboard();
+    }
+
+    async function loadLeaderboard() {
+      const q = query(collection(db, "leaderboard"), orderBy("score", "desc"), limit(5));
+      const snap = await getDocs(q);
+      const list = document.getElementById("scores");
+      list.innerHTML = "";
+      snap.forEach(doc => {
+        const d = doc.data();
+        const li = document.createElement("li");
+        li.textContent = `${d.name}: ${d.score}`;
+        list.appendChild(li);
       });
     }
-  }
-}
 
-// =============================
-// Main Loop
-// =============================
-function spawnEnemy() {
-  enemies.push(new Enemy());
-}
-
-function spawnPickup() {
-  const types = ["health", "shield", "speed", "damage", "shockwave"];
-  pickups.push(new Pickup(types[Math.floor(Math.random() * types.length)]));
-}
-
-function updateGame() {
-  if (gameOver) {
-    submitScoreToFirebase();
-    drawGameOver();
-    return;
-  }
-
-  timeSurvived++;
-
-  ctx.fillStyle = "#111";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Timed pickup spawns
-  if (timeSurvived - lastDrop > 12 * 60) { // every 12 seconds
-    spawnPickup();
-    lastDrop = timeSurvived;
-  }
-
-  // Spawn enemies every second
-  if (timeSurvived % 60 === 0) spawnEnemy();
-
-  player.update();
-  player.draw();
-
-  pickups.forEach((p, i) => {
-    p.draw();
-    const dist = Math.hypot(player.x - p.x, player.y - p.y);
-    if (dist < player.size + p.size) {
-      p.apply();
-      pickups.splice(i, 1);
+    function restartGame() {
+      player = new Player();
+      enemies = [];
+      pickups = [];
+      timeSurvived = 0;
+      lastDrop = 0;
+      score = 0;
+      gameOver = false;
+      updateGame();
     }
-  });
 
-  enemies.forEach((e, i) => {
-    e.update();
-    e.draw();
-    if (e.hp <= 0) enemies.splice(i, 1);
-  });
+    function updateGame() {
+      if (gameOver) { submitScore(); drawGameOver(); return; }
+      timeSurvived++;
+      ctx.fillStyle = "#112";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (timeSurvived - lastDrop > 12 * 60) { spawnPickup(); lastDrop = timeSurvived; }
+      if (timeSurvived % 120 === 0) spawnEnemy();
+      player.update(); player.draw();
+      pickups.forEach((p,i)=>{p.draw(); if(Math.hypot(player.x-p.x,player.y-p.y)<player.size+p.size){p.apply(); pickups.splice(i,1);}});
+      enemies.forEach((e,i)=>{e.update(); e.draw(); if(e.hp<=0) enemies.splice(i,1);});
+      drawHUD();
+      requestAnimationFrame(updateGame);
+    }
 
-  drawHUD();
-  requestAnimationFrame(updateGame);
-}
+    document.addEventListener("keydown", e=>{
+      keys[e.key]=true;
+      if(gameOver) restartGame();
+      if(e.key===" ") player.attack();
+    });
+    document.addEventListener("keyup", e=>keys[e.key]=false);
 
-// =============================
-// HUD + Game Over
-// =============================
-function drawHUD() {
-  ctx.fillStyle = "#fff";
-  ctx.font = "18px monospace";
-  ctx.fillText(`HP: ${player.hp}`, 20, 30);
-  ctx.fillText(`Shield: ${player.shield}`, 20, 55);
-  ctx.fillText(`Score: ${score}`, 20, 80);
-}
-
-function drawGameOver() {
-  ctx.fillStyle = "rgba(0,0,0,0.7)";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#fff";
-  ctx.font = "36px monospace";
-  ctx.fillText("GAME OVER", canvas.width / 2 - 120, canvas.height / 2);
-  ctx.font = "20px monospace";
-  ctx.fillText("Press any key to restart", canvas.width / 2 - 120, canvas.height / 2 + 40);
-}
-
-// =============================
-// Input
-// =============================
-document.addEventListener("keydown", e => {
-  keys[e.key] = true;
-  if (gameOver) restartGame();
-  if (e.key === " ") player.attack();
-});
-document.addEventListener("keyup", e => (keys[e.key] = false));
-
-// =============================
-// Firebase Leaderboard
-// =============================
-function submitScoreToFirebase() {
-  if (!window.db) return;
-  const name = prompt("Enter your name for the leaderboard:") || "Unknown";
-  db.collection("leaderboard").add({
-    name,
-    score,
-    time: new Date().toISOString()
-  });
-}
-
-// =============================
-// Restart
-// =============================
-function restartGame() {
-  player = new Player();
-  enemies = [];
-  pickups = [];
-  timeSurvived = 0;
-  lastDrop = 0;
-  score = 0;
-  gameOver = false;
-  updateGame();
-}
-
-// =============================
-// Start
-// =============================
-window.onload = () => {
-  player = new Player();
-  updateGame();
-};
-
-</script>
+    window.onload = ()=>{ player=new Player(); loadLeaderboard(); updateGame(); };
+  </script>
 </body>
 </html>
